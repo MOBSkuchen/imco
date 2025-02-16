@@ -1,9 +1,9 @@
+use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, ErrorKind};
-use clap::{Arg, ColorChoice, ValueHint};
+use clap::{Arg, ArgMatches, ColorChoice, ValueHint};
 use image::{ImageError, ImageFormat, ImageReader};
 use image::error::{UnsupportedError, UnsupportedErrorKind};
-use image::flat::Error;
 
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -23,9 +23,25 @@ enum ImcoError {
     // file path, [hint]
     Decoding(String, String),
     Encoding(String, String),
+    Unsupported(String, String),
     InternalConversionError(String),
     ResourceLimitReached(String),
-    Unsupported(String, String)
+}
+
+impl fmt::Display for ImcoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ImcoError::FailedFileRead(cause, path) => {write!(f, "Failed reading '{path}' => {cause}")}
+            ImcoError::FailedFileWrite(cause, path) => {write!(f, "Failed writing '{path}' => {cause}")}
+            ImcoError::InvalidFormat(fmt) => {write!(f, "Unknown format {fmt}, use --help for a list")}
+            ImcoError::NoDestFormat => {write!(f, "No output format provided (use --output-format)")}
+            ImcoError::Decoding(path, hint) => {write!(f, "Error during decoding of '{path}' => {hint}")}
+            ImcoError::Encoding(path, hint) => {write!(f, "Error during encoding of '{path}' => {hint}")}
+            ImcoError::Unsupported(path, hint) => {write!(f, "{hint} during conversion of '{path}'")}
+            ImcoError::InternalConversionError(path) => {write!(f, "Internal error during conversion of '{path}'")}
+            ImcoError::ResourceLimitReached(path) => {write!(f, "Exceeded resource limitation during conversion of '{path}'")}
+        }
+    }
 }
 
 type ImcoResult<T> = Result<T, ImcoError>;
@@ -62,10 +78,10 @@ fn mk_format(f: &String) -> ImcoResult<ImageFormat> {
 fn mk_unsupported_str(u: UnsupportedError) -> String {
     match u.kind() {
         UnsupportedErrorKind::Color(c) => {
-            "Unsupported color during conversion".to_string()
+            format!("Unsupported color ({:?})", c)
         }
         UnsupportedErrorKind::Format(f) => {
-            "Unsupported image format or not allowed format conversion".to_string()
+            format!("Unsupported image format or not allowed format ({})", f)
         }
         UnsupportedErrorKind::GenericFeature(gf) => {
             gf
@@ -79,8 +95,8 @@ fn image_err_convert<T>(res: Result<T, ImageError>, img_path: String) -> Result<
         match e {
             ImageError::Decoding(de) => { ImcoError::Decoding(img_path, de.to_string()) }
             ImageError::Encoding(ee) => { ImcoError::Encoding(img_path, ee.to_string()) }
-            ImageError::Parameter(p) => { ImcoError::InternalConversionError(img_path) }
-            ImageError::Limits(l) => { ImcoError::ResourceLimitReached(img_path) }
+            ImageError::Parameter(_) => { ImcoError::InternalConversionError(img_path) }
+            ImageError::Limits(_) => { ImcoError::ResourceLimitReached(img_path) }
             ImageError::Unsupported(u) => {ImcoError::Unsupported(img_path, mk_unsupported_str(u))}
             ImageError::IoError(e) => { io_error_convert::<String>(Err(e), &*img_path, false).unwrap_err() }
         }
@@ -118,7 +134,41 @@ fn process(couples: Vec<(&&String, Option<&&String>)>, i_fmt_s: Option<&String>,
     Ok(())
 }
 
-fn main() -> Result<(), ImcoError> {
+fn parse_and_execute(matches: ArgMatches) -> Result<(), ImcoError> {
+    // TODO: Add batch processing
+    let batch = matches.get_flag("batch");
+
+    let mut couples = vec![];
+
+    let input_files: Vec<&String> = matches
+        .get_many::<String>("input")
+        .unwrap()
+        .collect();
+
+    let output_files: Vec<&String> = matches
+        .get_many::<String>("output")
+        .map(|values| values.collect())
+        .unwrap_or_default();
+
+    for (i, input_file) in input_files.iter().enumerate() {
+        let partner = if output_files.is_empty() {
+            None
+        } else if i >= output_files.len() {
+            Some(output_files.last().unwrap())
+        } else {
+            Some(&output_files[i])
+        };
+
+        couples.push((input_file, partner))
+    }
+
+    let i_fmt = matches.get_one::<String>("input-format");
+    let o_fmt = matches.get_one::<String>("output-format");
+
+    process(couples, i_fmt, o_fmt, batch)
+}
+
+fn main() {
     let matches = clap::Command::new(NAME)
         .about(DESCRIPTION)
         .version(VERSION)
@@ -166,35 +216,8 @@ fn main() -> Result<(), ImcoError> {
             .action(clap::ArgAction::SetTrue))
         .get_matches();
     
-    // TODO: Add batch processing
-    let batch = matches.get_flag("batch");
-
-    let mut couples = vec![];
-
-    let input_files: Vec<&String> = matches
-        .get_many::<String>("input")
-        .unwrap()
-        .collect();
-
-    let output_files: Vec<&String> = matches
-        .get_many::<String>("output")
-        .map(|values| values.collect())
-        .unwrap_or_default();
-
-    for (i, input_file) in input_files.iter().enumerate() {
-        let partner = if output_files.is_empty() {
-            None
-        } else if i >= output_files.len() {
-            Some(output_files.last().unwrap())
-        } else {
-            Some(&output_files[i])
-        };
-        
-        couples.push((input_file, partner))
+    let res = parse_and_execute(matches);
+    if res.is_err() {
+        println!("{}", res.unwrap_err())
     }
-    
-    let i_fmt = matches.get_one::<String>("input-format");
-    let o_fmt = matches.get_one::<String>("output-format");
-    
-    process(couples, i_fmt, o_fmt, batch)
 }
