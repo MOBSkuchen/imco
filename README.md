@@ -31,4 +31,4 @@ Convert *lebron_james (ico)* to *lebron_james (tiff)*
 
 Convert all pngs files under *images* to jpgs under *output*
 
-``imco -i images/*.png -o output --output-format jpg``
+``imco -i images/*.png -o output --output-format jpg --batch``
