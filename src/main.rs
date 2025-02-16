@@ -78,7 +78,7 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
     Ok(if o_fmt.is_some() {
         let fmt = o_fmt.unwrap();
         // TODO : Better auto output
-        let output = if output.is_some() { output.unwrap() } else { path + fmt.extensions_str()[0]) };
+        let output = if output.is_some() { output.unwrap() } else { path + fmt.extensions_str()[0] };
         image_err_convert(image.save_with_format(&output, fmt))?;
         output
     } else {
