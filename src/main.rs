@@ -197,11 +197,7 @@ fn main() {
         .version(VERSION)
         .color(ColorChoice::Never)
         .disable_version_flag(true)
-        .arg(Arg::new("version")
-            .short('v')
-            .long("version")
-            .help("Displays the version")
-            .action(clap::ArgAction::Version))
+        .after_help("Accepted file formats:\n avif, jpg / jpeg / jfif, png / apng,\n gif, webp, tif / tiff, tga, dds,\n bmp, ico, hdr, exr, pbm / pam / ppm / pgm,\n ff, qoi, pcx")
         .arg(Arg::new("input")
             .help("Input files (seperated by ',')")
             .short('i')
@@ -237,6 +233,11 @@ fn main() {
             .short('b')
             .long("batch")
             .action(clap::ArgAction::SetTrue))
+        .arg(Arg::new("version")
+            .short('v')
+            .long("version")
+            .help("Print version")
+            .action(clap::ArgAction::Version))
         .get_matches();
     
     let res = parse_and_execute(matches);
