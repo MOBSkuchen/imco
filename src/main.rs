@@ -115,8 +115,9 @@ fn image_err_convert<T>(res: Result<T, ImageError>, img_path: String) -> Result<
 
 fn mk_filename(p: &String, fmt: ImageFormat) -> String {
     std::path::Path::new(&p).file_stem()
-        .or(Some((p.clone() + fmt.extensions_str()[0]).as_ref()))
-        .unwrap().to_str().unwrap().to_string()
+        .and_then(|t| {Some(format!("{}.{}", t.to_str().unwrap(), fmt.extensions_str()[0]))})
+        .or(Some(p.to_string() + fmt.extensions_str()[0]))
+        .unwrap()
 }
 
 fn join_path(p: &String, fmt: ImageFormat, stem: &String) -> String {
