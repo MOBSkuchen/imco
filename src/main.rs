@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io::{BufReader, ErrorKind};
 use clap::{Arg, ColorChoice, ValueHint};
-use image::{ImageFormat, ImageReader};
+use image::{ImageError, ImageFormat, ImageReader};
+use image::flat::Error;
 
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -13,13 +14,20 @@ enum ImcoError {
     FailedFileRead(String, String),
     FailedFileWrite(String, String),
 
-    InvalidFormat(String)
+    InvalidFormat(String),
+    UnknownFormat(String),
+    
+    NoDestFormat,
+    
+    ImageTooLarge,
+    
+    ConversionError(String)
 }
 
 type ImcoResult<T> = Result<T, ImcoError>;
 type ImReader = ImageReader<BufReader<File>>;
 
-fn io_error_convert<T, E>(res: Result<T, std::io::Error>, file_path: &str, is_read: bool) -> Result<T, ImcoError> {
+fn io_error_convert<T>(res: Result<T, std::io::Error>, file_path: &str, is_read: bool) -> Result<T, ImcoError> {
     res.map_err(|x| {
         let reason = match x.kind() {
             ErrorKind::NotFound => {"Not found"}
@@ -40,11 +48,55 @@ fn io_error_convert<T, E>(res: Result<T, std::io::Error>, file_path: &str, is_re
 }
 
 fn imread(path: &str) -> ImcoResult<ImReader> {
-    io_error_convert::<ImReader, ImcoError>(ImageReader::open(path), path, true)
+    io_error_convert::<ImReader>(ImageReader::open(path), path, true)
 }
 
 fn mk_format(f: &String) -> ImcoResult<ImageFormat> {
-    ImageFormat::from_extension(f).ok_or(ImcoError::InvalidFormat(f.to_owned()))
+    ImageFormat::from_extension("a.".to_string() + f).ok_or(ImcoError::InvalidFormat(f.to_owned()))
+}
+
+fn image_err_convert<T>(res: Result<T, ImageError>) -> Result<T, ImcoError> {
+    res.map_err(|e| {
+        match e {
+            ImageError::Decoding(_) => {}
+            ImageError::Encoding(_) => {}
+            ImageError::Parameter(_) => {}
+            ImageError::Limits(_) => {}
+            ImageError::Unsupported(f) => {}
+            ImageError::IoError(e) => {}
+        }
+    })
+}
+
+fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageFormat>, o_fmt: Option<ImageFormat>) -> ImcoResult<String> {
+    if output.is_none() && o_fmt.is_none() { return Err(ImcoError::NoDestFormat) }
+    
+    let mut raw_image = imread(&*path)?;
+    if i_fmt.is_some() { raw_image.set_format(i_fmt.unwrap()) }
+    let image = image_err_convert(raw_image.decode())?;
+    
+    Ok(if o_fmt.is_some() {
+        let fmt = o_fmt.unwrap();
+        // TODO : Better auto output
+        let output = if output.is_some() { output.unwrap() } else { path + fmt.extensions_str()[0]) };
+        image_err_convert(image.save_with_format(&output, fmt))?;
+        output
+    } else {
+        let output = output.unwrap();
+        image_err_convert(image.save(&output))?;
+        output
+    })
+}
+
+fn process(couples: Vec<(&&String, Option<&&String>)>, i_fmt_s: Option<&String>, o_fmt_s: Option<&String>, batch: bool) -> ImcoResult<()> {
+    let i_fmt = if i_fmt_s.is_some() { Some(mk_format(i_fmt_s.unwrap())?) } else {None};
+    let o_fmt = if o_fmt_s.is_some() { Some(mk_format(o_fmt_s.unwrap())?) } else {None};
+
+    for couple in couples {
+        individual_process(couple.0.to_string(), couple.1.and_then(|t| { Some(t.to_string()) }), i_fmt, o_fmt)?;
+    }
+    
+    Ok(())
 }
 
 fn main() -> Result<(), ImcoError> {
@@ -95,6 +147,9 @@ fn main() -> Result<(), ImcoError> {
             .action(clap::ArgAction::SetTrue))
         .get_matches();
     
+    // TODO: Add batch processing
+    let batch = matches.get_flag("batch");
+
     let mut couples = vec![];
 
     let input_files: Vec<&String> = matches
@@ -118,6 +173,9 @@ fn main() -> Result<(), ImcoError> {
         
         couples.push((input_file, partner))
     }
-
-    Ok(())
+    
+    let i_fmt = matches.get_one::<String>("input-format");
+    let o_fmt = matches.get_one::<String>("output-format");
+    
+    process(couples, i_fmt, o_fmt, batch)
 }
