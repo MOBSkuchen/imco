@@ -1,7 +1,15 @@
 [package]
 name = "imco"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+license = "MIT"
+description = "Easy image conversion"
+authors = ["MOBSkuchen"]
+keywords = ["image", "conversion", "cli"]
+categories = ["multimedia::images"]
+readme = "README.md"
+repository = "https://github.com/MOBSkuchen/imco"
+homepage = "https://crates.io/crates/imco"
 
 [dependencies]
 clap = "4.5.29"
