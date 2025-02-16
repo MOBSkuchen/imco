@@ -1,5 +1,7 @@
 # imco
-Image conversion tool
+Image conversion tool, support lots of formats and also resizing.
+
+Install using ``cargo install imco``
 ### Supported formats
 - AVIF
 - BMP
