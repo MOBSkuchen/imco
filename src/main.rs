@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, ErrorKind};
@@ -79,6 +80,10 @@ fn mk_format_fp(f: &String) -> ImcoResult<ImageFormat> {
     ImageFormat::from_extension(std::path::Path::new(f).extension().ok_or(ImcoError::InvalidFormat(f.to_owned()))?).ok_or(ImcoError::InvalidFormat(f.to_owned()))
 }
 
+fn only_filename(f: &String) -> Option<&OsStr> {
+    std::path::Path::new(f).file_stem()
+}
+
 fn mk_unsupported_str(u: UnsupportedError) -> String {
     match u.kind() {
         UnsupportedErrorKind::Color(c) => {
@@ -121,8 +126,11 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
     
     Ok(if o_fmt.is_some() {
         let fmt = o_fmt.unwrap();
-        // TODO : Better auto output
-        let output = if output.is_some() { output.unwrap() } else { path.clone() + fmt.extensions_str()[0] };
+        let output = if output.is_some() { output.unwrap() } else {
+            std::path::Path::new(&path).file_stem()
+                .or(Some((path.clone() + fmt.extensions_str()[0]).as_ref()))
+                .unwrap().to_str().unwrap().to_string()
+        };
         image_err_convert(image.save_with_format(&output, fmt), path)?;
         (output, org_fmt, fmt)
     } else {
