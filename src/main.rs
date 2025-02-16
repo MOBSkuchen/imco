@@ -72,7 +72,11 @@ fn imread(path: &str) -> ImcoResult<ImReader> {
 }
 
 fn mk_format(f: &String) -> ImcoResult<ImageFormat> {
-    ImageFormat::from_extension("a.".to_string() + f).ok_or(ImcoError::InvalidFormat(f.to_owned()))
+    ImageFormat::from_extension(f).ok_or(ImcoError::InvalidFormat(f.to_owned()))
+}
+
+fn mk_format_fp(f: &String) -> ImcoResult<ImageFormat> {
+    ImageFormat::from_extension(std::path::Path::new(f).extension().ok_or(ImcoError::InvalidFormat(f.to_owned()))?).ok_or(ImcoError::InvalidFormat(f.to_owned()))
 }
 
 fn mk_unsupported_str(u: UnsupportedError) -> String {
@@ -103,11 +107,16 @@ fn image_err_convert<T>(res: Result<T, ImageError>, img_path: String) -> Result<
     })
 }
 
-fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageFormat>, o_fmt: Option<ImageFormat>) -> ImcoResult<String> {
+fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageFormat>, o_fmt: Option<ImageFormat>) -> ImcoResult<(String, Option<ImageFormat>, ImageFormat)> {
     if output.is_none() && o_fmt.is_none() { return Err(ImcoError::NoDestFormat) }
     
     let mut raw_image = imread(&*path)?;
-    if i_fmt.is_some() { raw_image.set_format(i_fmt.unwrap()) }
+    let org_fmt = if i_fmt.is_some() {
+        raw_image.set_format(i_fmt.unwrap());
+        i_fmt
+    } else {
+        raw_image.format()
+    };
     let image = image_err_convert(raw_image.decode(), path.clone())?;
     
     Ok(if o_fmt.is_some() {
@@ -115,11 +124,12 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
         // TODO : Better auto output
         let output = if output.is_some() { output.unwrap() } else { path.clone() + fmt.extensions_str()[0] };
         image_err_convert(image.save_with_format(&output, fmt), path)?;
-        output
+        (output, org_fmt, fmt)
     } else {
         let output = output.unwrap();
+        let aif = mk_format_fp(&output)?;
         image_err_convert(image.save(&output), path)?;
-        output
+        (output, org_fmt, aif)
     })
 }
 
@@ -128,7 +138,12 @@ fn process(couples: Vec<(&&String, Option<&&String>)>, i_fmt_s: Option<&String>,
     let o_fmt = if o_fmt_s.is_some() { Some(mk_format(o_fmt_s.unwrap())?) } else {None};
 
     for couple in couples {
-        individual_process(couple.0.to_string(), couple.1.and_then(|t| { Some(t.to_string()) }), i_fmt, o_fmt)?;
+        let res = individual_process(couple.0.to_string(), couple.1.and_then(|t| { Some(t.to_string()) }), i_fmt, o_fmt)?;
+        if res.1.is_some() {
+            println!("{} ({}) -> {} ({})", couple.0, res.1.unwrap().extensions_str()[0], res.0, res.2.extensions_str()[0])
+        } else {
+            println!("{} -> {} ({})", couple.0, res.0, res.2.extensions_str()[0])
+        }
     }
     
     Ok(())
