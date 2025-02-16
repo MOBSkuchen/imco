@@ -6,6 +6,7 @@ use clap::parser::ValuesRef;
 use image::{ImageError, ImageFormat, ImageReader};
 use image::error::{UnsupportedError, UnsupportedErrorKind};
 use glob::glob;
+use image::imageops::FilterType;
 
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -28,7 +29,9 @@ enum ImcoError {
     ResourceLimitReached(String),
     // Error, Pattern
     BatchPattern(String, String),
-    BatchReadEntry(String)
+    BatchReadEntry(String),
+    // "Number"
+    NotANumber
 }
 
 impl fmt::Display for ImcoError {
@@ -46,6 +49,7 @@ impl fmt::Display for ImcoError {
             ImcoError::ResourceLimitReached(path) => {write!(f, "Exceeded resource limitation during conversion of '{path}'")},
             ImcoError::BatchPattern(err, pat) => { write!(f, "Failed to collect files using glob, '{pat}' => {err}") }
             ImcoError::BatchReadEntry(err) => { write!(f, "Failed to read directory entry using glob => {err}") },
+            ImcoError::NotANumber => write!(f, "Resolution contains a string which is not an unsigned number"),
         }
     }
 }
@@ -124,7 +128,7 @@ fn join_path(p: &String, fmt: ImageFormat, stem: &String) -> String {
     std::path::Path::new(stem).join(mk_filename(p, fmt)).to_str().unwrap().to_string()
 }
 
-fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageFormat>, o_fmt: Option<ImageFormat>, batch: bool) -> ImcoResult<(String, Option<ImageFormat>, ImageFormat)> {
+fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageFormat>, o_fmt: Option<ImageFormat>, batch: bool, resolution: Option<(u32, u32)>) -> ImcoResult<(String, Option<ImageFormat>, ImageFormat)> {
     if output.is_none() && o_fmt.is_none() { return Err(ImcoError::NoDestFormat) }
     
     let mut raw_image = imread(&*path)?;
@@ -132,7 +136,11 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
         raw_image.set_format(i_fmt.unwrap());
         i_fmt
     } else { raw_image.format() };
-    let image = image_err_convert(raw_image.decode(), path.clone())?;
+    let mut image = image_err_convert(raw_image.decode(), path.clone())?;
+    if resolution.is_some() {
+        let resolution = resolution.unwrap();
+        image = image.resize(resolution.0, resolution.1, FilterType::Nearest);
+    }
     
     Ok(if o_fmt.is_some() {
         let fmt = o_fmt.unwrap();
@@ -148,12 +156,13 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
     })
 }
 
-fn process(couples: Vec<(&String, Option<&&String>)>, i_fmt_s: Option<&String>, o_fmt_s: Option<&String>, batch: bool) -> ImcoResult<()> {
+fn process(couples: Vec<(&String, Option<&&String>)>, i_fmt_s: Option<&String>, o_fmt_s: Option<&String>,
+           batch: bool, resolution: Option<(u32, u32)>) -> ImcoResult<()> {
     let i_fmt = if i_fmt_s.is_some() { Some(mk_format(i_fmt_s.unwrap())?) } else {None};
     let o_fmt = if o_fmt_s.is_some() { Some(mk_format(o_fmt_s.unwrap())?) } else {None};
 
     for couple in couples {
-        let res = individual_process(couple.0.to_string(), couple.1.and_then(|t| { Some(t.to_string()) }), i_fmt, o_fmt, batch)?;
+        let res = individual_process(couple.0.to_string(), couple.1.and_then(|t| { Some(t.to_string()) }), i_fmt, o_fmt, batch, resolution)?;
         if res.1.is_some() {
             println!("{} ({}) -> {} ({})", couple.0, res.1.unwrap().extensions_str()[0], res.0, res.2.extensions_str()[0])
         } else {
@@ -182,7 +191,26 @@ fn expand_patterns_to_files(patterns: ValuesRef<String>) -> ImcoResult<Vec<Strin
     Ok(files)
 }
 
+fn collect_ok<T, E>(results: Vec<Result<T, E>>) -> Result<Vec<T>, E> {
+    let mut ok_values = Vec::new();
+
+    for result in results {
+        match result {
+            Ok(value) => ok_values.push(value),
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(ok_values)
+}
+
 fn parse_and_execute(matches: ArgMatches) -> Result<(), ImcoError> {
+    let raw_resolution = matches.get_many::<String>("resolution");
+    let resolution = if raw_resolution.is_some() {
+        let x = collect_ok(raw_resolution.unwrap().map(|x1| { x1.parse::<u32>() }).collect()).map_err(|_| {ImcoError::NotANumber})?;
+        Some((x[0], x[1]))
+    } else {None};
+    
     let batch = matches.get_flag("batch");
 
     let mut couples = vec![];
@@ -213,7 +241,7 @@ fn parse_and_execute(matches: ArgMatches) -> Result<(), ImcoError> {
     let i_fmt = matches.get_one::<String>("input-format");
     let o_fmt = matches.get_one::<String>("output-format");
 
-    process(couples, i_fmt, o_fmt, batch)
+    process(couples, i_fmt, o_fmt, batch, resolution)
 }
 
 fn main() {
@@ -258,6 +286,14 @@ fn main() {
             .short('b')
             .long("batch")
             .action(clap::ArgAction::SetTrue))
+        .arg(Arg::new("resolution")
+            .help("Set output resolution")
+            .short('r')
+            .long("resolution")
+            .alias("res")
+            .num_args(2)
+            .value_names(["width", "height"])
+            .action(clap::ArgAction::Set))
         .arg(Arg::new("version")
             .short('v')
             .long("version")
