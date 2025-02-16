@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufReader, ErrorKind};
 use clap::{Arg, ColorChoice, ValueHint};
 use image::{ImageError, ImageFormat, ImageReader};
+use image::error::{UnsupportedError, UnsupportedErrorKind};
 use image::flat::Error;
 
 pub const NAME: &str = env!("CARGO_PKG_NAME");
@@ -13,15 +14,18 @@ enum ImcoError {
     // IO Errors; Reason, Path
     FailedFileRead(String, String),
     FailedFileWrite(String, String),
-
+    
+    // Format
     InvalidFormat(String),
-    UnknownFormat(String),
     
     NoDestFormat,
     
-    ImageTooLarge,
-    
-    ConversionError(String)
+    // file path, [hint]
+    Decoding(String, String),
+    Encoding(String, String),
+    InternalConversionError(String),
+    ResourceLimitReached(String),
+    Unsupported(String, String)
 }
 
 type ImcoResult<T> = Result<T, ImcoError>;
@@ -55,15 +59,30 @@ fn mk_format(f: &String) -> ImcoResult<ImageFormat> {
     ImageFormat::from_extension("a.".to_string() + f).ok_or(ImcoError::InvalidFormat(f.to_owned()))
 }
 
-fn image_err_convert<T>(res: Result<T, ImageError>) -> Result<T, ImcoError> {
+fn mk_unsupported_str(u: UnsupportedError) -> String {
+    match u.kind() {
+        UnsupportedErrorKind::Color(c) => {
+            "Unsupported color during conversion".to_string()
+        }
+        UnsupportedErrorKind::Format(f) => {
+            "Unsupported image format or not allowed format conversion".to_string()
+        }
+        UnsupportedErrorKind::GenericFeature(gf) => {
+            gf
+        },
+        _ => "Other".to_string(),
+    }
+}
+
+fn image_err_convert<T>(res: Result<T, ImageError>, img_path: String) -> Result<T, ImcoError> {
     res.map_err(|e| {
         match e {
-            ImageError::Decoding(_) => {}
-            ImageError::Encoding(_) => {}
-            ImageError::Parameter(_) => {}
-            ImageError::Limits(_) => {}
-            ImageError::Unsupported(f) => {}
-            ImageError::IoError(e) => {}
+            ImageError::Decoding(de) => { ImcoError::Decoding(img_path, de.to_string()) }
+            ImageError::Encoding(ee) => { ImcoError::Encoding(img_path, ee.to_string()) }
+            ImageError::Parameter(p) => { ImcoError::InternalConversionError(img_path) }
+            ImageError::Limits(l) => { ImcoError::ResourceLimitReached(img_path) }
+            ImageError::Unsupported(u) => {ImcoError::Unsupported(img_path, mk_unsupported_str(u))}
+            ImageError::IoError(e) => { io_error_convert::<String>(Err(e), &*img_path, false).unwrap_err() }
         }
     })
 }
@@ -73,17 +92,17 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
     
     let mut raw_image = imread(&*path)?;
     if i_fmt.is_some() { raw_image.set_format(i_fmt.unwrap()) }
-    let image = image_err_convert(raw_image.decode())?;
+    let image = image_err_convert(raw_image.decode(), path.clone())?;
     
     Ok(if o_fmt.is_some() {
         let fmt = o_fmt.unwrap();
         // TODO : Better auto output
-        let output = if output.is_some() { output.unwrap() } else { path + fmt.extensions_str()[0] };
-        image_err_convert(image.save_with_format(&output, fmt))?;
+        let output = if output.is_some() { output.unwrap() } else { path.clone() + fmt.extensions_str()[0] };
+        image_err_convert(image.save_with_format(&output, fmt), path)?;
         output
     } else {
         let output = output.unwrap();
-        image_err_convert(image.save(&output))?;
+        image_err_convert(image.save(&output), path)?;
         output
     })
 }
