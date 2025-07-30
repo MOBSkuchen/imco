@@ -139,7 +139,7 @@ fn individual_process(path: String, output: Option<String>, i_fmt: Option<ImageF
     let mut image = image_err_convert(raw_image.decode(), path.clone())?;
     if resolution.is_some() {
         let resolution = resolution.unwrap();
-        image = image.resize(resolution.0, resolution.1, FilterType::Nearest);
+        image = image.resize_exact(resolution.0, resolution.1, FilterType::Nearest);
     }
     
     Ok(if o_fmt.is_some() {
@@ -283,10 +283,10 @@ fn main() {
             .short('b')
             .long("batch")
             .action(clap::ArgAction::SetTrue))
-        .arg(Arg::new("resolution")
-            .help("Set output resolution")
+        .arg(Arg::new("resize")
+            .help("Set output resolution a.k.a resize")
             .short('r')
-            .long("resolution")
+            .long("resize")
             .alias("res")
             .num_args(2)
             .value_names(["width", "height"])
